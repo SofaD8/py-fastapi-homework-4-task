@@ -8,7 +8,7 @@ from storages import S3StorageInterface
 from config.dependencies import get_s3_storage_client, get_jwt_auth_manager
 from security.interfaces import JWTAuthManagerInterface
 from security.http import get_token
-from exceptions import TokenExpiredError, InvalidTokenError
+from exceptions.security import TokenExpiredError, InvalidTokenError
 
 router = APIRouter()
 
@@ -45,6 +45,10 @@ async def create_profile(
     users = {u.id: u for u in result.scalars().all()}
 
     current_user = users.get(current_user_id)
+
+    if not current_user or not current_user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or not active.")
+
     target_user = users.get(user_id)
 
     if not target_user or not target_user.is_active:
@@ -61,19 +65,36 @@ async def create_profile(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User already has a profile.")
 
     # 5. Avatar Upload to S3 Storage
+    avatar.file.seek(0)
+
     try:
         from validation import validate_image
+
         validate_image(avatar)
-        
-        file_extension = avatar.filename.split(".")[-1]
+
+        file_data = await avatar.read()
+
+        file_extension = avatar.filename.rsplit('.', 1)[-1].lower()
         s3_path = f"avatars/{user_id}_avatar.{file_extension}"
-        avatar_url = s3_client.upload_file(avatar.file, s3_path)
+
+        avatar_url = await s3_client.upload_file(s3_path, file_data)
+
         if not avatar_url:
-             raise Exception("S3 upload returned no URL")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to upload avatar. Please try again later."
+            )
+
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to upload avatar. Please try again later.")
+    except Exception as e:
+        import logging
+
+        logging.error(f"S3 upload error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to upload avatar. Please try again later."
+        )
 
     # 6. Profile Creation and Storage
     new_profile = UserProfileModel(

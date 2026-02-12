@@ -1,5 +1,4 @@
 from datetime import date
-from typing import Optional
 
 from fastapi import UploadFile, Form, File
 from pydantic import BaseModel, field_validator, ConfigDict
@@ -18,6 +17,7 @@ class ProfileCreateSchema(BaseModel):
     gender: str
     date_of_birth: date
     info: str
+    avatar: UploadFile
 
     @classmethod
     def as_form(
@@ -26,14 +26,16 @@ class ProfileCreateSchema(BaseModel):
         last_name: str = Form(...),
         gender: str = Form(...),
         date_of_birth: date = Form(...),
-        info: str = Form(...)
+        info: str = Form(...),
+        avatar: UploadFile = File(...)
     ):
         return cls(
             first_name=first_name,
             last_name=last_name,
             gender=gender,
             date_of_birth=date_of_birth,
-            info=info
+            info=info,
+            avatar = avatar
         )
 
     @field_validator("first_name", "last_name")
@@ -45,7 +47,6 @@ class ProfileCreateSchema(BaseModel):
     @field_validator("gender")
     @classmethod
     def check_gender(cls, v: str) -> str:
-        # If it's a GenderEnum, take its value, otherwise use v
         val = v.value if hasattr(v, 'value') else v
         validate_gender(val)
         return val
@@ -61,6 +62,12 @@ class ProfileCreateSchema(BaseModel):
     def check_info(cls, v: str) -> str:
         if not v or v.isspace():
             raise ValueError("Info cannot be empty or consist only of spaces.")
+        return v
+
+    @field_validator("avatar")
+    @classmethod
+    def check_avatar(cls, v: UploadFile) -> UploadFile:
+        validate_image(v)
         return v
 
 
